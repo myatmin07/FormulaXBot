@@ -8,7 +8,7 @@ import re
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
-CORS(app) # Vercel ကနေ လှမ်းချိတ်လို့ရအောင်
+CORS(app) 
 
 # --- Server API Mapping ---
 OUTLINE_APIS = {
@@ -17,7 +17,7 @@ OUTLINE_APIS = {
 }
 
 def bytes_to_gb(bytes_val):
-    if not bytes_val: return 0.0
+    if not bytes_val: return 0.00
     return round(bytes_val / (1024 * 1024 * 1024), 2)
 
 @app.route('/api/check_usage', methods=['POST'])
@@ -26,7 +26,7 @@ def check_usage():
         data = request.get_json()
         access_url = data.get('access_url', '').strip()
         
-        # IP Extract လုပ်ခြင်း
+        # Extract IP
         match = re.search(r'@([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):', access_url)
         if not match:
             return jsonify({'success': False, 'error': 'Invalid Key Format'}), 400
@@ -37,19 +37,19 @@ def check_usage():
         if not api_url:
             return jsonify({'success': False, 'error': 'Server not supported'}), 404
 
-        # Keys ဆွဲထုတ်ခြင်း
+        # Fetch Keys and Metrics
         keys_res = requests.get(f"{api_url}/access-keys", verify=False, timeout=10)
         metrics_res = requests.get(f"{api_url}/metrics/transfer", verify=False, timeout=10)
         
         if keys_res.status_code != 200 or metrics_res.status_code != 200:
-            return jsonify({'success': False, 'error': 'Server Error'}), 500
+            return jsonify({'success': False, 'error': 'Server API Error'}), 500
             
         keys_data = keys_res.json().get('accessKeys', [])
-        metrics_data = metrics_res.json().get('bytesTransferredByUserId', {})
+        metrics_data = metrics_res.json().get('bytesTransferredByUserId') or {}
         
         for key in keys_data:
             if key.get('accessUrl') == access_url:
-                kid = key.get('id')
+                kid = str(key.get('id')) # Fixed Type Mismatch
                 used_bytes = metrics_data.get(kid, 0)
                 limit_bytes = key.get('dataLimit', {}).get('bytes')
                 
@@ -57,7 +57,7 @@ def check_usage():
                 limit_gb = bytes_to_gb(limit_bytes) if limit_bytes else "Unlimited"
                 
                 percentage = 0
-                if limit_bytes:
+                if limit_bytes and limit_bytes > 0:
                     percentage = min(100, round((used_bytes / limit_bytes) * 100))
                 
                 return jsonify({
