@@ -299,7 +299,7 @@ def query_handler(call):
 
     elif data == "prod_chatgpt":
         kb = {"inline_keyboard": [
-            [{"text": "Plus 1 Month | 2000 MMK", "callback_data": "buy_acc_chatgpt_plus_2000"}],
+            [{"text": "Plus 1 Month | 20000 MMK", "callback_data": "buy_acc_chatgpt_plus_2000"}],
             [{"text": "Plus Renew 1 Month | 35000 MMK", "callback_data": "buy_acc_chatgpt_renew_35000"}],
             [{"text": "BUSINESS 1 Month | 25000 MMK", "callback_data": "buy_acc_chatgpt_biz_25000"}],
             [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
