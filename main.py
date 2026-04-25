@@ -14,21 +14,22 @@ import re
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# --- Configuration ---
 API_TOKEN = '8483869457:AAFBlSIu_6biWRAZ7lgGBrT-smj7C7tsQ20'
 ADMIN_ID = 5890904598
 bot = telebot.TeleBot(API_TOKEN)
 
-# Data Files
+WEBAPP_URL = "https://xndk.vercel.app"
+
 PENDING_FILE = "formula_x_pending.json"
 USAGE_FILE = "formula_x_usage.json"
 STOCK_FILE = "formula_x_stock.json"
 USERS_FILE = "formula_x_users.json"
 HISTORY_FILE = "formula_x_history.json"
 SETTINGS_FILE = "formula_x_settings.json" 
+AUTH_FILE = "formula_x_auth.json"
+KEYS_FILE = "formula_x_keys.json"
 MAX_LIMIT_GB = 3000
 
-# --- Database Management ---
 def save_db(file, data):
     with open(file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
@@ -39,7 +40,11 @@ def load_db(file):
         try: return json.load(f)
         except: return {}
 
-# --- Custom Settings & Stock Logic ---
+def is_authorized(uid):
+    if uid == ADMIN_ID: return True
+    db = load_db(AUTH_FILE)
+    return str(uid) in db
+
 def toggle_visibility(prod):
     db = load_db(SETTINGS_FILE)
     hidden = db.get("hidden_prods", [])
@@ -54,12 +59,14 @@ def is_hidden(prod):
 def get_stock(prod):
     return load_db(STOCK_FILE).get(prod, [])
 
-def pop_stock(prod):
+def pop_stock(prod, qty=1):
     db = load_db(STOCK_FILE)
-    if prod not in db or len(db[prod]) == 0: return None
-    acc = db[prod].pop(0) 
+    if prod not in db or len(db[prod]) < qty: return []
+    accs = []
+    for _ in range(qty):
+        accs.append(db[prod].pop(0))
     save_db(STOCK_FILE, db)
-    return acc
+    return accs
 
 def add_user(uid, name):
     db = load_db(USERS_FILE)
@@ -73,11 +80,9 @@ def add_history(uid, record):
     db[str(uid)].append(record)
     save_db(HISTORY_FILE, db)
 
-# --- Emoji Formatting ---
 def tg_emoji(emoji_id, fallback):
     return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
 
-# Premium Emoji IDs
 E_CHATGPT_ID = "6242255100924924923"
 E_ALIGHT_ID = "6239810925231084514"
 E_BACK_ID = "6084482488078437565"
@@ -102,8 +107,9 @@ E_CAPCUT_ID = "5364339557712020484"
 E_DAYS_ID = "5382194935057372936"
 E_SUMMARY_ID = "4960766907113276588"
 E_QTY_ID = "5823347218056221496"
+E_EMAIL_ID = "5253742260054409879"
+E_WARN_ID = "5420323339723881652"
 
-# Global Reusable HTML Emoji Tags
 E_TIP = tg_emoji("5841359499146825803", "⌨️")
 E_STORE = tg_emoji("5229064374403998351", "🛍️")
 E_OUTLINE = tg_emoji(E_OUTLINE_ID, "📱")
@@ -118,7 +124,7 @@ E_GROK = tg_emoji(E_GROK_ID, "👁")
 E_YOUTUBE = tg_emoji(E_YOUTUBE_ID, "▶️")
 E_ORDER = tg_emoji("5231200819986047254", "📊")
 E_PRICE = tg_emoji("5197434882321567830", "💲")
-E_EMAIL = tg_emoji("5472239203590888751", "📧") 
+E_EMAIL = tg_emoji(E_EMAIL_ID, "📧") 
 E_PASSWORD = tg_emoji("5256248974767046755", "🔑") 
 E_LINK = tg_emoji(E_LINK_ID, "🔗")
 E_BULB = tg_emoji(E_BULB_ID, "💡")
@@ -130,6 +136,7 @@ E_VERIFIED = tg_emoji(E_VERIFIED_ID, "✔️")
 E_DAYS = tg_emoji(E_DAYS_ID, "⏳")
 E_SUMMARY = tg_emoji(E_SUMMARY_ID, "🛒")
 E_QTY = tg_emoji(E_QTY_ID, "📦")
+E_WARN = tg_emoji(E_WARN_ID, "⚠️")
 
 PROD_INFO = {
     "capcut": (E_CAPCUT, "CapCut", "Team 35 Days"),
@@ -147,14 +154,12 @@ PROD_INFO = {
     "spotify_3": (E_SPOTIFY, "Spotify", "3 Months Individual")
 }
 
-# --- Raw API Request for UI ---
 def send_styled(chat_id, text, kb_json, mid=None):
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "reply_markup": json.dumps(kb_json), "disable_web_page_preview": True}
     url = f"https://api.telegram.org/bot{API_TOKEN}/editMessageText" if mid else f"https://api.telegram.org/bot{API_TOKEN}/sendMessage"
     if mid: payload["message_id"] = mid
     return requests.post(url, data=payload)
 
-# --- Keyboards ---
 def get_main_menu(uid):
     rows = []
     if not is_hidden("out"): rows.append([{"text": "Outline VPN", "callback_data": "prod_out", "icon_custom_emoji_id": E_OUTLINE_ID, "style": "success"}])
@@ -187,7 +192,34 @@ def contact_admin_kb(back_data="back_home"):
         [{"text": "Back", "callback_data": back_data, "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
     ]}
 
-# --- VPN API Logic ---
+def out_of_stock_kb(back_data="back_home"):
+    return {"inline_keyboard": [
+        [{"text": "Contact Admin", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}],
+        [{"text": "Back", "callback_data": back_data, "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
+    ]}
+
+def get_product_buttons(prod_list, back_target):
+    kb = {"inline_keyboard": []}
+    db = load_db(STOCK_FILE)
+    
+    for prod_id, duration, price, title in prod_list:
+        stock = db.get(prod_id, [])
+        if stock:
+            if duration:
+                acc = stock[0]
+                ts = acc.get("timestamp", time.time())
+                days_passed = int((time.time() - ts) / 86400)
+                days_left = max(0, duration - days_passed)
+                btn_text = f"Buy {title} | {price:,} MMK | {days_left} Days"
+            else:
+                btn_text = f"Buy {title} | {price:,} MMK"
+            kb["inline_keyboard"].append([{"text": btn_text, "callback_data": f"plan_acc_{prod_id}_{price}"}])
+        else:
+            kb["inline_keyboard"].append([{"text": f"Contact Admin - {title}", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}])
+            
+    kb["inline_keyboard"].append([{"text": "Back", "callback_data": back_target, "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}])
+    return kb
+
 XUI_URL = "https://152.42.165.158:56869/G93DW24bMmtXj9Vpv5"
 XUI_USERNAME = "8R7vfIqhS1"
 XUI_PASSWORD = "kKF8GLiNHK"
@@ -245,31 +277,95 @@ def add_usage(gb):
     data["total_sold_gb"] = data.get("total_sold_gb", 0) + gb
     save_db(USAGE_FILE, data)
 
-# --- Handlers ---
+@bot.message_handler(commands=['genkey'])
+def genkey_cmd(m):
+    if m.from_user.id != ADMIN_ID: return
+    key = f"FX-{uuid.uuid4().hex[:8].upper()}"
+    db = load_db(KEYS_FILE)
+    db[key] = True
+    save_db(KEYS_FILE, db)
+    bot.reply_to(m, f"🔑 New Access Key Generated:\n\n<code>{key}</code>", parse_mode="HTML")
+
 @bot.message_handler(commands=['start'])
 def start_cmd(m):
+    if not is_authorized(m.from_user.id):
+        bot.send_message(m.chat.id, f"{E_WARN} <b>Access Denied</b>\n\nYou need an access key to use this bot.\nPlease enter your access key or contact @FORMULA_X0 to purchase one.", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        return
+
     add_user(m.from_user.id, m.from_user.first_name)
     tz = pytz.timezone('Asia/Yangon')
     now = datetime.now(tz).strftime("%A, %B %d")
     
     reply_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    reply_markup.add("🛍️ Discover Products", "🔔 Contact Admin")
-    reply_markup.add("👤 My Info", "📊 Order History")
+    btn_store = types.KeyboardButton(text="🛍️ Digital Store", web_app=types.WebAppInfo(url=WEBAPP_URL))
+    reply_markup.add(btn_store, types.KeyboardButton("🔔 Contact Admin"))
+    reply_markup.add(types.KeyboardButton("👤 My Info"), types.KeyboardButton("📊 Order History"))
     
-    caption = f"{m.from_user.first_name} — Hope your day is going smoothly\nTime: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Use the menu below your message box."
-    img_url = "https://raw.githubusercontent.com/myatmin07/Formula/refs/heads/main/file_000000009dd0720899ff78779c7e1fd2.png"
+    caption = f"{m.from_user.first_name} — Hope your day is going smoothly\nTime: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Click '🛍️ Digital Store' below to open the Mini App."
     
-    try: bot.send_photo(m.chat.id, img_url, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
-    except: bot.send_message(m.chat.id, caption, parse_mode="HTML", reply_markup=reply_markup)
+    img = "1000001623.png"
+    if os.path.exists(img):
+        with open(img, "rb") as p: bot.send_photo(m.chat.id, p, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    else:
+        bot.send_message(m.chat.id, caption, parse_mode="HTML", reply_markup=reply_markup)
         
     send_styled(m.chat.id, f"{E_STORE} <b>Discover our products:</b>", get_main_menu(m.from_user.id))
 
-@bot.message_handler(func=lambda m: m.text in ["🛍️ Discover Products", "🔔 Contact Admin", "👤 My Info", "📊 Order History"])
+@bot.message_handler(content_types=['web_app_data'])
+def handle_webapp_data(message):
+    if not is_authorized(message.from_user.id): return
+    try:
+        data = json.loads(message.web_app_data.data)
+        if data.get("action") == "buy_vpn_webapp":
+            prod_type = data.get("product")
+            server = data.get("server")
+            gb_val = data.get("gb")
+            price = data.get("price")
+            qty = 1 
+            
+            oid = ''.join(random.choices(string.digits, k=5))
+            pending = load_db(PENDING_FILE)
+            pending[oid] = {"uid": message.chat.id, "product": prod_type, "server": server, "gb": gb_val, "qty": qty, "total": price}
+            save_db(PENDING_FILE, pending)
+            
+            kb = {"inline_keyboard": [
+                [{"text": "Wave Pay", "callback_data": f"pay_wav_{oid}", "icon_custom_emoji_id": E_WAVE_ID}],
+                [{"text": "KPay", "callback_data": f"pay_kpy_{oid}", "icon_custom_emoji_id": E_KPAY_ID}],
+                [{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
+            ]}
+            
+            icon = E_OUTLINE if prod_type == "out" else E_HIDDIFY
+            prod_name = "Outline VPN" if prod_type == "out" else "Hiddify / V2Ray"
+            flag = "🇸🇬 Singapore" if server == "sg" else "🇺🇸 USA"
+            
+            summary = f"{E_SUMMARY} <b>Order Summary (App)</b>\n\n{icon} {prod_name} - {flag}\n{E_QTY} Package: {gb_val} GB | 1 Month\n{E_PRICE} Total: <b>{price:,} MMK</b>\n{E_ORDER} Order ID: #{oid}\n\nSelect Payment Method:"
+            
+            send_styled(message.chat.id, summary, kb)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"{E_WARN} Error processing app data.")
+
+@bot.message_handler(func=lambda m: True)
 def text_reply(m):
     uid = m.from_user.id
-    if m.text == "🛍️ Discover Products":
-        send_styled(m.chat.id, f"{E_STORE} <b>Discover our products:</b>", get_main_menu(uid))
-    elif m.text == "🔔 Contact Admin":
+    
+    if not is_authorized(uid):
+        key = m.text.strip()
+        keys_db = load_db(KEYS_FILE)
+        if key in keys_db:
+            del keys_db[key]
+            save_db(KEYS_FILE, keys_db)
+            
+            auth_db = load_db(AUTH_FILE)
+            auth_db[str(uid)] = True
+            save_db(AUTH_FILE, auth_db)
+            
+            add_user(uid, m.from_user.first_name)
+            bot.send_message(m.chat.id, f"{E_VERIFIED} <b>Access Granted!</b>\nWelcome to Formula-X Hub. Send /start to begin.", parse_mode="HTML")
+        else:
+            bot.send_message(m.chat.id, f"{E_WARN} <b>Invalid Key</b>\nPlease contact @FORMULA_X0.", parse_mode="HTML")
+        return
+
+    if m.text == "🔔 Contact Admin":
         text = "<b>Contact Admin</b>\nNeed help? Reach out anytime:\n@FORMULA_X0"
         send_styled(m.chat.id, text, contact_admin_kb())
     elif m.text == "👤 My Info":
@@ -279,23 +375,28 @@ def text_reply(m):
         send_styled(m.chat.id, text, contact_admin_kb())
     elif m.text == "📊 Order History":
         history = load_db(HISTORY_FILE).get(str(uid), [])
-        text = f"{E_ORDER} <b>Order History</b>\n\n" + ("\n".join(history[-10:]) if history else "No orders found yet.")
+        text = f"{E_ORDER} <b>Order History</b>\n\n"
+        if history:
+            for r in history[-10:]:
+                text += f"• #{r['oid']} {r['product']} ({r['qty']}x) - {r['total']} MMK\n"
+        else:
+            text += "No orders found yet."
         send_styled(m.chat.id, text, contact_admin_kb())
 
 @bot.callback_query_handler(func=lambda call: True)
 def query_handler(call):
+    uid, cid, mid = call.from_user.id, call.message.chat.id, call.message.message_id
+    if not is_authorized(uid):
+        bot.answer_callback_query(call.id, "Access Denied.", show_alert=True)
+        return
+        
     try: bot.answer_callback_query(call.id)
     except: pass
     
-    uid, cid, mid = call.from_user.id, call.message.chat.id, call.message.message_id
     data = call.data
 
     if data == "back_home":
         send_styled(cid, f"{E_STORE} <b>Discover our products:</b>", get_main_menu(uid), mid)
-        
-    elif data == "out_of_stock":
-        text = f"⚠️ <b>Out of Stock!</b>\nThis item is currently out of stock.\n\nPlease contact admin to purchase."
-        send_styled(cid, text, contact_admin_kb("back_home"), mid)
 
     elif data == "prod_out":
         kb = {"inline_keyboard": [[{"text": "🇸🇬 Singapore", "callback_data": "srv_out_sg"}], [{"text": "🇺🇸 USA", "callback_data": "srv_out_us"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
@@ -306,66 +407,49 @@ def query_handler(call):
         send_styled(cid, f"{E_HIDDIFY} <b>Select Hiddify Server:</b>", kb, mid)
 
     elif data == "prod_capcut":
-        kb = {"inline_keyboard": [[{"text": "Team | 35 Days | 5500 MMK", "callback_data": "buy_acc_capcut_5500"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = get_product_buttons([("capcut", None, 5500, "Team 35 Days")], "back_home")
         send_styled(cid, f"{E_CAPCUT} <b>CapCut Premium:</b>", kb, mid)
 
     elif data == "prod_alight":
-        kb = {"inline_keyboard": [[{"text": "Private - 1 Year | 5,000 MMK", "callback_data": "buy_acc_alight_5000"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = get_product_buttons([("alight", None, 5000, "Private 1 Year")], "back_home")
         send_styled(cid, f"{E_ALIGHT} <b>Alight Motion:</b>", kb, mid)
 
     elif data == "prod_chatgpt":
-        kb = {"inline_keyboard": [
-            [{"text": "Plus 1 Month | 20000 MMK", "callback_data": "buy_acc_chatgpt_plus_20000"}],
-            [{"text": "Plus Renew 1 Month | 35000 MMK", "callback_data": "buy_acc_chatgpt_renew_35000"}],
-            [{"text": "BUSINESS 1 Month | 25000 MMK", "callback_data": "buy_acc_chatgpt_biz_25000"}],
-            [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
-        ]}
+        kb = get_product_buttons([
+            ("chatgpt_plus", None, 20000, "Plus 1 Month"),
+            ("chatgpt_renew", None, 35000, "Plus Renew 1 Month"),
+            ("chatgpt_biz", None, 25000, "BUSINESS 1 Month")
+        ], "back_home")
         text = f"{E_CHATGPT} <b>Select a plan:</b>\n\n• <b>Plus & Plus Renew:</b> Private, Full Warranty.\n• <b>Business:</b> Private, 1 Time Replacement."
         send_styled(cid, text, kb, mid)
         
     elif data == "prod_spotify":
-        kb = {"inline_keyboard": []}
-        db = load_db(STOCK_FILE)
-        
-        text = f"{E_SPOTIFY} <b>Select a Spotify plan:</b>\n\n"
-        
-        for prod, duration, price, title in [("spotify_2", 60, 9000, "2 Months Individual"), ("spotify_3", 90, 13500, "3 Months Individual")]:
-            stock = db.get(prod, [])
-            if stock:
-                acc = stock[0]
-                ts = acc.get("timestamp", time.time())
-                days_passed = int((time.time() - ts) / 86400)
-                days_left = max(0, duration - days_passed)
-                
-                text += f"• <b>{title}</b>\n"
-                text += f"  {E_PRICE} {price:,} MMK • {E_DAYS} {days_left} days left\n\n"
-                
-                kb["inline_keyboard"].append([{"text": f"Buy {title} - {price:,} MMK", "callback_data": f"buy_acc_{prod}_{price}"}])
-            else:
-                text += f"• <b>{title}</b>\n  ❌ Out of Stock\n\n"
-                kb["inline_keyboard"].append([{"text": f"{title} | Out of Stock", "callback_data": f"out_of_stock"}])
-                
-        kb["inline_keyboard"].append([{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}])
-        send_styled(cid, text, kb, mid)
+        kb = get_product_buttons([
+            ("spotify_2", 60, 9000, "2 Months"),
+            ("spotify_3", 90, 13500, "3 Months")
+        ], "back_home")
+        send_styled(cid, f"{E_SPOTIFY} <b>Select a Spotify plan:</b>", kb, mid)
 
     elif data == "prod_gemini":
-        kb = {"inline_keyboard": [
-            [{"text": "Gemini Pro | 1 Year | 10,000 MMK", "callback_data": "buy_acc_gemini_pro_10000"}],
-            [{"text": "Veo3 Ultra | 25K Credit | 16,000 MMK", "callback_data": "buy_acc_gemini_veo_16000"}],
-            [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
-        ]}
+        kb = get_product_buttons([
+            ("gemini_pro", None, 10000, "Pro 1 Year"),
+            ("gemini_veo", None, 16000, "Veo3 Ultra")
+        ], "back_home")
         send_styled(cid, f"{E_GEMINI} <b>Select Gemini Plan:</b>", kb, mid)
 
     elif data == "prod_zoom":
-        kb = {"inline_keyboard": [[{"text": "100p | 28 Days | 8,000 MMK", "callback_data": "buy_acc_zoom_8000"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = get_product_buttons([("zoom", None, 8000, "100p | 28 Days")], "back_home")
         send_styled(cid, f"{E_ZOOM} <b>Zoom Premium:</b>", kb, mid)
 
     elif data == "prod_grok":
-        kb = {"inline_keyboard": [[{"text": "Super 7 Days | 4,000 MMK", "callback_data": "buy_acc_grok_7_4000"}], [{"text": "Super 15 Days | 8,000 MMK", "callback_data": "buy_acc_grok_15_8000"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = get_product_buttons([
+            ("grok_7", None, 4000, "Super 7 Days"),
+            ("grok_15", None, 8000, "Super 15 Days")
+        ], "back_home")
         send_styled(cid, f"{E_GROK} <b>Grok Select Plan:</b>", kb, mid)
 
     elif data == "prod_youtube":
-        kb = {"inline_keyboard": [[{"text": "Premium Individual 1 Month | 8,000 MMK", "callback_data": "buy_acc_youtube_8000"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = get_product_buttons([("youtube", None, 8000, "Premium 1 Month")], "back_home")
         send_styled(cid, f"{E_YOUTUBE} <b>YouTube Premium:</b>", kb, mid)
 
     elif data == "admin_stock_btn" and uid == ADMIN_ID:
@@ -418,59 +502,28 @@ def query_handler(call):
         
         text = f"{icon} <b>{name} - {flag} {srv_name}</b>\n\nSelect a plan:"
         kb = {"inline_keyboard": [
-            [{"text": "50 GB | 1,500 MMK | 1 Month", "callback_data": f"plan_{prod_type}_{server}_50"}],
-            [{"text": "100 GB | 3,000 MMK | 1 Month", "callback_data": f"plan_{prod_type}_{server}_100"}],
-            [{"text": "150 GB | 4,000 MMK | 1 Month", "callback_data": f"plan_{prod_type}_{server}_150"}],
-            [{"text": "200 GB | 5,000 MMK | 1 Month", "callback_data": f"plan_{prod_type}_{server}_200"}],
+            [{"text": "50 GB | 1,500 MMK | 1 Month", "callback_data": f"plan_vpn_{prod_type}_{server}_50"}],
+            [{"text": "100 GB | 3,000 MMK | 1 Month", "callback_data": f"plan_vpn_{prod_type}_{server}_100"}],
+            [{"text": "150 GB | 4,000 MMK | 1 Month", "callback_data": f"plan_vpn_{prod_type}_{server}_150"}],
+            [{"text": "200 GB | 5,000 MMK | 1 Month", "callback_data": f"plan_vpn_{prod_type}_{server}_200"}],
             [{"text": "Back", "callback_data": f"prod_{'out' if prod_type == 'out' else 'hid'}", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
         ]}
         send_styled(cid, text, kb, mid)
 
-    elif data.startswith("plan_"):
+    elif data.startswith("plan_vpn_"):
         parts = data.split("_")
-        prod_type = parts[1]
-        server = parts[2]
-        gb_val = int(parts[3])
+        prod_type = parts[2]
+        server = parts[3]
+        gb_val = int(parts[4])
         sent = bot.send_message(cid, "✍️ <b>Please type the quantity you want to buy (e.g., 5):</b>", parse_mode="HTML")
         bot.register_next_step_handler(sent, process_vpn_qty, prod_type, server, gb_val)
 
-    elif data.startswith("buy_acc_"):
-        stripped = data[8:]
-        last_us_idx = stripped.rfind('_')
-        prod = stripped[:last_us_idx]
-        price = int(stripped[last_us_idx+1:])
-        
-        if not get_stock(prod):
-            text = f"⚠️ <b>Out of Stock!</b>\nThis item is currently out of stock.\n\nPlease contact admin to purchase."
-            send_styled(cid, text, contact_admin_kb("back_home"), mid)
-            return
-
-        oid = ''.join(random.choices(string.digits, k=5))
-        pending = load_db(PENDING_FILE)
-        pending[oid] = {"uid": uid, "product": prod, "total": price, "qty": 1, "gb": 0, "server": "none"}
-        save_db(PENDING_FILE, pending)
-        
-        kb = {"inline_keyboard": [
-            [{"text": "Wave Pay", "callback_data": f"pay_wav_{oid}", "icon_custom_emoji_id": E_WAVE_ID}],
-            [{"text": "KPay", "callback_data": f"pay_kpy_{oid}", "icon_custom_emoji_id": E_KPAY_ID}],
-            [{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
-        ]}
-        
-        icon = PROD_INFO.get(prod, (E_STORE, "Product", ""))[0]
-        prod_name = PROD_INFO.get(prod, (E_STORE, prod.replace('_', ' ').title(), ""))[1]
-        plan_desc = PROD_INFO.get(prod, (E_STORE, "", ""))[2]
-        
-        summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
-        if plan_desc:
-            summary += f"{icon} {prod_name} - {plan_desc}\n"
-        else:
-            summary += f"{icon} {prod_name}\n"
-        summary += f"{E_QTY} Quantity: 1\n"
-        summary += f"{E_PRICE} Total: <b>{price:,} MMK</b>\n"
-        summary += f"{E_ORDER} Order ID: #{oid}\n\n"
-        summary += f"Select Payment Method:"
-        
-        send_styled(cid, summary, kb, mid)
+    elif data.startswith("plan_acc_"):
+        parts = data.split("_")
+        prod_id = "_".join(parts[2:-1])
+        price = int(parts[-1])
+        sent = bot.send_message(cid, "✍️ <b>Please type the quantity you want to buy (e.g., 2):</b>", parse_mode="HTML")
+        bot.register_next_step_handler(sent, process_acc_qty, prod_id, price)
 
     elif data.startswith("pay_"):
         parts = data.split("_")
@@ -494,10 +547,12 @@ def query_handler(call):
             info = PROD_INFO.get(prod_type, (E_STORE, prod_type.replace('_', ' ').title(), ""))
             icon, prod_name, plan_desc = info[0], info[1], info[2]
             
-        summary = f"{icon} {order['qty']}x {prod_name}"
+        summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
+        summary += f"{icon} {prod_name}"
         if plan_desc:
             summary += f" - {plan_desc}"
-        summary += f"\n{E_PRICE} Price: <b>{total:,} MMK</b>\n"
+        summary += f"\n{E_QTY} Quantity: {order['qty']}\n"
+        summary += f"{E_PRICE} Total: <b>{total:,} MMK</b>\n"
         summary += f"{E_ORDER} Order ID: #{oid}\n\n"
         summary += f"{bank_logo} Pay via {bank_name}\n\n"
         summary += f"{tg_emoji('5407025283456835913', '📱')} Account: <code>09770088206</code>\n"
@@ -529,9 +584,9 @@ def query_handler(call):
                 bot.send_message(user_id, success_msg, parse_mode="HTML")
                 bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nOutline keys sent.", cid, mid, parse_mode="HTML")
                 add_usage(gb_val)
-                add_history(user_id, f"• Web Order Outline VPN {gb_val}GB - confirmed - {date_str}")
+                add_history(user_id, {"oid": "WEB", "product": "Outline VPN", "qty": 1, "total": 0, "date": date_str})
             else:
-                bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Web Order (Outline).")
+                bot.send_message(ADMIN_ID, f"{E_WARN} Error: API failed for Web Order (Outline).")
                 bot.edit_message_caption(f"{caption}\n\n❌ <b>FAILED:</b> API Error.", cid, mid, parse_mode="HTML")
         
         elif prod_type == "hiddify":
@@ -542,9 +597,9 @@ def query_handler(call):
                 bot.send_message(user_id, success_msg, parse_mode="HTML")
                 bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nHiddify keys sent.", cid, mid, parse_mode="HTML")
                 add_usage(gb_val)
-                add_history(user_id, f"• Web Order Hiddify VPN {gb_val}GB - confirmed - {date_str}")
+                add_history(user_id, {"oid": "WEB", "product": "Hiddify VPN", "qty": 1, "total": 0, "date": date_str})
             else:
-                bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Web Order (Hiddify).")
+                bot.send_message(ADMIN_ID, f"{E_WARN} Error: API failed for Web Order (Hiddify).")
                 bot.edit_message_caption(f"{caption}\n\n❌ <b>FAILED:</b> API Error.", cid, mid, parse_mode="HTML")
 
     elif data.startswith("approve_"):
@@ -569,10 +624,10 @@ def query_handler(call):
                     bot.send_message(order['uid'], success_msg, parse_mode="HTML")
                     bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\nOutline keys sent.", cid, mid, parse_mode="HTML")
                     add_usage(order['gb'] * order['qty'])
-                    add_history(order['uid'], f"• #{oid} Outline VPN {order['gb']}GB - confirmed - {date_str}")
+                    add_history(order['uid'], {"oid": oid, "product": "Outline VPN", "qty": order['qty'], "total": order['total'], "date": date_str})
                     del pending[oid]
                 else:
-                    bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Order #{oid}.")
+                    bot.send_message(ADMIN_ID, f"{E_WARN} Error: API failed for Order #{oid}.")
             else:
                 links = generate_3xui_keys(30, order['gb'], order['uid'], order['qty'])
                 if len(links) == order['qty']:
@@ -581,14 +636,14 @@ def query_handler(call):
                     bot.send_message(order['uid'], success_msg, parse_mode="HTML")
                     bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\nHiddify keys sent.", cid, mid, parse_mode="HTML")
                     add_usage(order['gb'] * order['qty'])
-                    add_history(order['uid'], f"• #{oid} Hiddify VPN {order['gb']}GB - confirmed - {date_str}")
+                    add_history(order['uid'], {"oid": oid, "product": "Hiddify VPN", "qty": order['qty'], "total": order['total'], "date": date_str})
                     del pending[oid]
                 else:
-                    bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Order #{oid}.")
+                    bot.send_message(ADMIN_ID, f"{E_WARN} Error: API failed for Order #{oid}.")
                     
         else:
-            acc = pop_stock(prod_type)
-            if not acc:
+            accs = pop_stock(prod_type, order['qty'])
+            if not accs or len(accs) < order['qty']:
                 bot.send_message(ADMIN_ID, f"❌ <b>OUT OF STOCK!</b>\nCannot deliver {prod_type} for Order #{oid}. Please manually send to user <code>{order['uid']}</code>.", parse_mode="HTML")
                 bot.edit_message_caption(f"❌ <b>FAILED:</b> Out of Stock for Order #{oid}.", cid, mid, parse_mode="HTML")
                 return
@@ -600,7 +655,7 @@ def query_handler(call):
                 text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
                 text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
                 text += f"{E_ORDER} Order ID: #{oid}\n\n"
-                text += f"⚠️ <b>Do NOT change Mail & Password</b>\n"
+                text += f"{E_WARN} <b>Do NOT change Mail & Password</b>\n"
                 text += f"4 Devices 📱\n"
                 text += f"Renewed every 7 days for 5 times {E_VERIFIED}\n\n"
                 text += f"<b>What you get:</b> Team plan access for 1 month\n\n"
@@ -608,7 +663,10 @@ def query_handler(call):
                 text += f"• Sign in to CapCut with the email and password below.\n"
                 text += f"• Use only within the terms you agreed with the seller.\n"
                 text += f"• If something fails, contact admin with your Order ID.\n\n"
-                text += f"{acc['data']}"
+                
+                for i, acc in enumerate(accs):
+                    if len(accs) > 1: text += f"<b>Account {i+1}:</b>\n"
+                    text += f"{acc['data']}\n\n"
                 
                 markup = {"inline_keyboard": [
                     [{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}]
@@ -624,14 +682,16 @@ def query_handler(call):
                 text += f"• Choose <b>Sign in with email</b>\n"
                 text += f"• Enter the email below\n"
                 text += f"• Open your inbox (button below) and use the sign-in link from the email\n\n"
-                text += f"{acc['data']}"
                 
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+', acc['data'])
                 markup_keys = []
-                if email_match:
-                    markup_keys.append([{"text": "Mail Access 📩", "url": f"https://generator.email/{email_match.group(0)}"}])
+                for i, acc in enumerate(accs):
+                    if len(accs) > 1: text += f"<b>Account {i+1}:</b>\n"
+                    text += f"{acc['data']}\n\n"
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+', acc['data'])
+                    if email_match:
+                        markup_keys.append([{"text": f"Mail Access {i+1} 📩", "url": f"https://generator.email/{email_match.group(0)}"}])
+                        
                 markup_keys.append([{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}])
-                
                 markup = {"inline_keyboard": markup_keys}
                 send_styled(order['uid'], text, markup)
                 
@@ -639,8 +699,10 @@ def query_handler(call):
                 text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
                 text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
                 text += f"{E_ORDER} Order ID: #{oid}\n\n"
-                text += f"<b>Your account:</b>\n\n"
-                text += f"{acc['data']}\n\n"
+                text += f"<b>Your account(s):</b>\n\n"
+                for i, acc in enumerate(accs):
+                    if len(accs) > 1: text += f"<b>Account {i+1}:</b>\n"
+                    text += f"{acc['data']}\n\n"
                 text += f"Sign in with the credentials above. Keep them private. Contact admin with your Order ID if you need help."
                 
                 markup = {"inline_keyboard": [
@@ -658,9 +720,12 @@ def query_handler(call):
                 text += f"<b>Instructions:</b>\n"
                 text += f"• Sign in with the credentials below.\n"
                 if "grok" in prod_type:
-                    text += f"• ⚠️ <b>Do NOT change Mail & Password</b>\n"
+                    text += f"• {E_WARN} <b>Do NOT change Mail & Password</b>\n"
                 text += f"• Keep them private and use within agreed terms.\n\n"
-                text += f"{acc['data']}"
+                
+                for i, acc in enumerate(accs):
+                    if len(accs) > 1: text += f"<b>Account {i+1}:</b>\n"
+                    text += f"{acc['data']}\n\n"
                 
                 markup = {"inline_keyboard": [
                     [{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}]
@@ -668,7 +733,7 @@ def query_handler(call):
                 send_styled(order['uid'], text, markup)
                 
             bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\n{prod_name} details sent.", cid, mid, parse_mode="HTML")
-            add_history(order['uid'], f"• #{oid} {prod_name} - confirmed - {date_str}")
+            add_history(order['uid'], {"oid": oid, "product": prod_name, "qty": order['qty'], "total": order['total'], "date": date_str})
             del pending[oid]
 
         save_db(PENDING_FILE, pending)
@@ -695,7 +760,7 @@ def process_vpn_qty(message, prod_type, server, gb_val):
     try:
         qty_str = message.text.strip()
         if not qty_str.isdigit():
-            sent = bot.send_message(message.chat.id, "⚠️ Invalid input. Enter a number:", parse_mode="HTML")
+            sent = bot.send_message(message.chat.id, f"{E_WARN} Invalid input. Enter a number:", parse_mode="HTML")
             bot.register_next_step_handler(sent, process_vpn_qty, prod_type, server, gb_val)
             return
             
@@ -704,7 +769,7 @@ def process_vpn_qty(message, prod_type, server, gb_val):
         
         current_usage = get_current_usage()
         if (current_usage + (gb_val * qty)) > MAX_LIMIT_GB:
-            bot.send_message(message.chat.id, f"⚠️ <b>Out of Stock!</b> Limit is 3TB. Remaining: {MAX_LIMIT_GB - current_usage} GB.", parse_mode="HTML")
+            bot.send_message(message.chat.id, f"{E_WARN} <b>Out of Stock!</b> Limit is 3TB. Remaining: {MAX_LIMIT_GB - current_usage} GB.", parse_mode="HTML")
             return
 
         prices = {50: 1500, 100: 3000, 150: 4000, 200: 5000}
@@ -733,7 +798,53 @@ def process_vpn_qty(message, prod_type, server, gb_val):
         
         send_styled(message.chat.id, summary, kb)
     except:
-        bot.send_message(message.chat.id, "⚠️ Invalid quantity.", parse_mode="HTML")
+        bot.send_message(message.chat.id, f"{E_WARN} Invalid quantity.", parse_mode="HTML")
+
+def process_acc_qty(message, prod_id, price):
+    try:
+        qty_str = message.text.strip()
+        if not qty_str.isdigit():
+            sent = bot.send_message(message.chat.id, f"{E_WARN} Invalid input. Enter a number:", parse_mode="HTML")
+            bot.register_next_step_handler(sent, process_acc_qty, prod_id, price)
+            return
+            
+        qty = int(qty_str)
+        if qty <= 0: raise ValueError
+        
+        stock = get_stock(prod_id)
+        if len(stock) < qty:
+            bot.send_message(message.chat.id, f"{E_WARN} <b>Insufficient Stock!</b>\nOnly {len(stock)} accounts available.", parse_mode="HTML")
+            return
+            
+        total = price * qty
+        oid = ''.join(random.choices(string.digits, k=5))
+        
+        pending = load_db(PENDING_FILE)
+        pending[oid] = {"uid": message.chat.id, "product": prod_id, "server": "none", "gb": 0, "qty": qty, "total": total}
+        save_db(PENDING_FILE, pending)
+        
+        kb = {"inline_keyboard": [
+            [{"text": "Wave Pay", "callback_data": f"pay_wav_{oid}", "icon_custom_emoji_id": E_WAVE_ID}],
+            [{"text": "KPay", "callback_data": f"pay_kpy_{oid}", "icon_custom_emoji_id": E_KPAY_ID}],
+            [{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
+        ]}
+        
+        info = PROD_INFO.get(prod_id, (E_STORE, prod_id.replace('_', ' ').title(), ""))
+        icon, prod_name, plan_desc = info[0], info[1], info[2]
+        
+        summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
+        if plan_desc:
+            summary += f"{icon} {prod_name} - {plan_desc}\n"
+        else:
+            summary += f"{icon} {prod_name}\n"
+        summary += f"{E_QTY} Quantity: {qty}\n"
+        summary += f"{E_PRICE} Total: <b>{total:,} MMK</b>\n"
+        summary += f"{E_ORDER} Order ID: #{oid}\n\n"
+        summary += f"Select Payment Method:"
+        
+        send_styled(message.chat.id, summary, kb)
+    except:
+        bot.send_message(message.chat.id, f"{E_WARN} Invalid quantity.", parse_mode="HTML")
 
 def process_stock(m, p):
     db = load_db(STOCK_FILE)
@@ -745,13 +856,14 @@ def process_stock(m, p):
     })
     
     save_db(STOCK_FILE, db) 
-    bot.reply_to(m, f"✅ Stock successfully added to <b>{p.upper()}</b>.\nTotal Available: {len(db[p])}", parse_mode="HTML")
+    bot.reply_to(m, f"{E_VERIFIED} Stock successfully added to <b>{p.upper()}</b>.\nTotal Available: {len(db[p])}", parse_mode="HTML")
 
 @bot.message_handler(content_types=['photo'])
 def handle_payment_slip(message):
     uid = message.from_user.id
-    pending = load_db(PENDING_FILE)
+    if not is_authorized(uid): return
     
+    pending = load_db(PENDING_FILE)
     user_orders = [oid for oid, val in pending.items() if val.get('uid') == uid]
     if not user_orders:
         return 
@@ -769,16 +881,19 @@ def handle_payment_slip(message):
     )
     
     order = pending[order_id]
-    prod_name = order.get('product', '').replace('_', ' ').title()
-    if prod_name == "Out": prod_name = "Outline VPN"
-    elif prod_name == "Hid": prod_name = "Hiddify VPN"
     
-    gb_txt = f"{order.get('gb')} GB" if order.get('gb', 0) > 0 else "Account"
+    if order['product'] in ["out", "hid"]:
+        prod_name = "Outline VPN" if order['product'] == "out" else "Hiddify VPN"
+        gb_txt = f"{order.get('gb')} GB"
+    else:
+        info = PROD_INFO.get(order['product'], (E_STORE, order['product'].replace('_', ' ').title(), ""))
+        prod_name = f"{info[1]} {info[2]}"
+        gb_txt = "Account"
     
     caption = f"🔔 <b>New Payment Slip!</b>\n\n🆔 Order: #{order_id}\n👤 User: <code>{uid}</code>\n💰 Total: {order['total']:,} MMK\n📦 Product: {prod_name} - {gb_txt} (Qty: {order['qty']})"
     
     bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, reply_markup=markup, parse_mode="HTML")
-    bot.reply_to(message, "✅ <b>Slip received.</b> Admin will verify it shortly.", parse_mode="HTML")
+    bot.reply_to(message, f"{E_VERIFIED} <b>Slip received.</b> Admin will verify it shortly.", parse_mode="HTML")
 
 if __name__ == "__main__":
     bot.infinity_polling()
