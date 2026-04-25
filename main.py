@@ -477,6 +477,48 @@ def query_handler(call):
         kb = {"inline_keyboard": [[{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
         send_styled(cid, text, kb, mid)
 
+    elif data.startswith("apw_"):
+        # Web App ကလာတဲ့ Order တွေကို Auto Approve လုပ်မည့်အပိုင်း
+        parts = data.split("_")
+        user_id = parts[1]
+        prod_type = parts[2]
+        gb_val = int(parts[3])
+
+        bot.edit_message_caption(f"⌛ <b>Processing Web Order...</b>", cid, mid, parse_mode="HTML")
+        
+        # Caption ထဲကနေ Server ကို ရှာဖွေခြင်း (e.g., 🌍 Server: SG)
+        caption = call.message.caption or ""
+        server = "us" if "US" in caption.upper() else "sg"
+        
+        tz = pytz.timezone('Asia/Yangon')
+        date_str = datetime.now(tz).strftime('%Y-%m-%d')
+        
+        if prod_type == "outline":
+            links = generate_outline_keys(server, gb_val, 1)
+            if links:
+                links_text = "\n\n".join([f"{E_LINK} Link 1:\n<code>{l}</code>" for l in links])
+                success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Outline VPN keys:\n\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy key.\n2. Open Outline App.\n3. Click {E_PLUS} to add server."
+                bot.send_message(user_id, success_msg, parse_mode="HTML")
+                bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nOutline keys sent.", cid, mid, parse_mode="HTML")
+                add_usage(gb_val)
+                add_history(user_id, f"• Web Order Outline VPN {gb_val}GB - confirmed - {date_str}")
+            else:
+                bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Web Order (Outline).")
+                bot.edit_message_caption(f"{caption}\n\n❌ <b>FAILED:</b> API Error.", cid, mid, parse_mode="HTML")
+        
+        elif prod_type == "hiddify":
+            links = generate_3xui_keys(30, gb_val, user_id, 1)
+            if links:
+                links_text = "\n\n".join([f"{E_LINK} Link 1:\n<code>{l}</code>" for l in links])
+                success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Hiddify/V2Ray links:\n{links_text}"
+                bot.send_message(user_id, success_msg, parse_mode="HTML")
+                bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nHiddify keys sent.", cid, mid, parse_mode="HTML")
+                add_usage(gb_val)
+                add_history(user_id, f"• Web Order Hiddify VPN {gb_val}GB - confirmed - {date_str}")
+            else:
+                bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Web Order (Hiddify).")
+                bot.edit_message_caption(f"{caption}\n\n❌ <b>FAILED:</b> API Error.", cid, mid, parse_mode="HTML")
+
     elif data.startswith("approve_"):
         oid = call.data.split("_")[1]
         pending = load_db(PENDING_FILE)
@@ -644,47 +686,6 @@ def handle_payment_slip(message):
     bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, reply_markup=markup, parse_mode="HTML")
     bot.reply_to(message, "✅ <b>Slip received.</b> Admin will verify it shortly.", parse_mode="HTML")
 
-@bot.message_handler(content_types=['web_app_data'])
-def handle_webapp_data(message):
-    try:
-        data = json.loads(message.web_app_data.data)
-        
-        if data.get('action') == "buy_vpn_webapp":
-            product = "Outline" if data.get('product') == "out" else "Hiddify"
-            msg = f"🔔 **New Order Received**\n\n"
-            msg += f"👤 User: {message.from_user.first_name}\n"
-            msg += f"📦 Product: {product}\n"
-            msg += f"🌍 Server: {data.get('server', '').upper()}\n"
-            msg += f"📊 Data: {data.get('gb')} GB\n"
-            msg += f"💰 Price: {data.get('price')} MMK\n\n"
-            msg += "Please send your payment screenshot to proceed."
-            
-            bot.send_message(message.chat.id, msg, parse_mode="Markdown")
-
-        elif data.get('action') == "check_key_webapp":
-            access_url = data.get('access_url')
-            bot.send_message(message.chat.id, "🔍 Checking key status... Please wait.")
-            
-            try:
-                import requests
-                res = requests.post('http://127.0.0.1:5000/api/check_usage', json={"access_url": access_url})
-                result = res.json()
-                
-                if result.get('success'):
-                    d = result.get('data')
-                    r_msg = f"📊 **Key Status Result**\n\n"
-                    r_msg += f"📍 Server: {d.get('server').upper()}\n"
-                    r_msg += f"📤 Used: {d.get('used_gb')} GB\n"
-                    r_msg += f"📥 Limit: {d.get('limit_gb')} GB\n"
-                    r_msg += f"🔄 Usage: {d.get('percentage')}%\n"
-                    bot.send_message(message.chat.id, r_msg, parse_mode="Markdown")
-                else:
-                    bot.send_message(message.chat.id, f"❌ Error: {result.get('error')}")
-            except Exception as e:
-                bot.send_message(message.chat.id, "❌ Cannot connect to API. Please ensure app.py is running on port 5000.")
-
-    except Exception as e:
-        print(f"Error processing web_app_data: {e}")
 if __name__ == "__main__":
     print("Formula X Final is starting on VPS...")
     bot.infinity_polling()
