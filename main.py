@@ -644,6 +644,47 @@ def handle_payment_slip(message):
     bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=caption, reply_markup=markup, parse_mode="HTML")
     bot.reply_to(message, "✅ <b>Slip received.</b> Admin will verify it shortly.", parse_mode="HTML")
 
+@bot.message_handler(content_types=['web_app_data'])
+def handle_webapp_data(message):
+    try:
+        data = json.loads(message.web_app_data.data)
+        
+        if data.get('action') == "buy_vpn_webapp":
+            product = "Outline" if data.get('product') == "out" else "Hiddify"
+            msg = f"🔔 **New Order Received**\n\n"
+            msg += f"👤 User: {message.from_user.first_name}\n"
+            msg += f"📦 Product: {product}\n"
+            msg += f"🌍 Server: {data.get('server', '').upper()}\n"
+            msg += f"📊 Data: {data.get('gb')} GB\n"
+            msg += f"💰 Price: {data.get('price')} MMK\n\n"
+            msg += "Please send your payment screenshot to proceed."
+            
+            bot.send_message(message.chat.id, msg, parse_mode="Markdown")
+
+        elif data.get('action') == "check_key_webapp":
+            access_url = data.get('access_url')
+            bot.send_message(message.chat.id, "🔍 Checking key status... Please wait.")
+            
+            try:
+                import requests
+                res = requests.post('http://127.0.0.1:5000/api/check_usage', json={"access_url": access_url})
+                result = res.json()
+                
+                if result.get('success'):
+                    d = result.get('data')
+                    r_msg = f"📊 **Key Status Result**\n\n"
+                    r_msg += f"📍 Server: {d.get('server').upper()}\n"
+                    r_msg += f"📤 Used: {d.get('used_gb')} GB\n"
+                    r_msg += f"📥 Limit: {d.get('limit_gb')} GB\n"
+                    r_msg += f"🔄 Usage: {d.get('percentage')}%\n"
+                    bot.send_message(message.chat.id, r_msg, parse_mode="Markdown")
+                else:
+                    bot.send_message(message.chat.id, f"❌ Error: {result.get('error')}")
+            except Exception as e:
+                bot.send_message(message.chat.id, "❌ Cannot connect to API. Please ensure app.py is running on port 5000.")
+
+    except Exception as e:
+        print(f"Error processing web_app_data: {e}")
 if __name__ == "__main__":
     print("Formula X Final is starting on VPS...")
     bot.infinity_polling()
