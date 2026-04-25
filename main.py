@@ -10,8 +10,8 @@ from datetime import datetime
 import pytz
 import urllib3
 import time
+import re
 
-# Disable SSL Warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- Configuration ---
@@ -25,7 +25,7 @@ USAGE_FILE = "formula_x_usage.json"
 STOCK_FILE = "formula_x_stock.json"
 USERS_FILE = "formula_x_users.json"
 HISTORY_FILE = "formula_x_history.json"
-SETTINGS_FILE = "formula_x_settings.json" # To save hidden buttons
+SETTINGS_FILE = "formula_x_settings.json" 
 MAX_LIMIT_GB = 3000
 
 # --- Database Management ---
@@ -57,7 +57,7 @@ def get_stock(prod):
 def pop_stock(prod):
     db = load_db(STOCK_FILE)
     if prod not in db or len(db[prod]) == 0: return None
-    acc = db[prod].pop(0) # Pop the first item permanently
+    acc = db[prod].pop(0) 
     save_db(STOCK_FILE, db)
     return acc
 
@@ -99,6 +99,9 @@ E_MYINFO_ID = "5258011929993026890"
 E_VERIFIED_ID = "5206607081334906820"
 E_CONTACT_ID = "5458603043203327669"
 E_CAPCUT_ID = "5364339557712020484"
+E_DAYS_ID = "5382194935057372936"
+E_SUMMARY_ID = "4960766907113276588"
+E_QTY_ID = "5823347218056221496"
 
 # Global Reusable HTML Emoji Tags
 E_TIP = tg_emoji("5841359499146825803", "⌨️")
@@ -114,7 +117,7 @@ E_ZOOM = tg_emoji(E_ZOOM_ID, "📹")
 E_GROK = tg_emoji(E_GROK_ID, "👁")
 E_YOUTUBE = tg_emoji(E_YOUTUBE_ID, "▶️")
 E_ORDER = tg_emoji("5231200819986047254", "📊")
-E_PRICE = tg_emoji("5197434882321567830", "💵")
+E_PRICE = tg_emoji("5197434882321567830", "💲")
 E_EMAIL = tg_emoji("5472239203590888751", "📧") 
 E_PASSWORD = tg_emoji("5256248974767046755", "🔑") 
 E_LINK = tg_emoji(E_LINK_ID, "🔗")
@@ -124,6 +127,25 @@ E_WAVE = tg_emoji(E_WAVE_ID, "🌊")
 E_KPAY = tg_emoji(E_KPAY_ID, "🔵")
 E_MYINFO = tg_emoji(E_MYINFO_ID, "👤")
 E_VERIFIED = tg_emoji(E_VERIFIED_ID, "✔️")
+E_DAYS = tg_emoji(E_DAYS_ID, "⏳")
+E_SUMMARY = tg_emoji(E_SUMMARY_ID, "🛒")
+E_QTY = tg_emoji(E_QTY_ID, "📦")
+
+PROD_INFO = {
+    "capcut": (E_CAPCUT, "CapCut", "Team 35 Days"),
+    "alight": (E_ALIGHT, "Alight Motion", "Private - 1 Year"),
+    "gemini_pro": (E_GEMINI, "Gemini Pro", "1 Year"),
+    "gemini_veo": (E_GEMINI, "Veo3 Ultra", "25K Credit"),
+    "zoom": (E_ZOOM, "Zoom Premium", "100p | 28 Days"),
+    "grok_7": (E_GROK, "Grok", "Super 7 Days"),
+    "grok_15": (E_GROK, "Grok", "Super 15 Days"),
+    "youtube": (E_YOUTUBE, "YouTube Premium", "Individual 1 Month"),
+    "chatgpt_plus": (E_CHATGPT, "ChatGPT Plus", "1 Month"),
+    "chatgpt_renew": (E_CHATGPT, "ChatGPT Plus Renew", "1 Month"),
+    "chatgpt_biz": (E_CHATGPT, "ChatGPT Business", "1 Month"),
+    "spotify_2": (E_SPOTIFY, "Spotify", "2 Months Individual"),
+    "spotify_3": (E_SPOTIFY, "Spotify", "3 Months Individual")
+}
 
 # --- Raw API Request for UI ---
 def send_styled(chat_id, text, kb_json, mid=None):
@@ -135,23 +157,17 @@ def send_styled(chat_id, text, kb_json, mid=None):
 # --- Keyboards ---
 def get_main_menu(uid):
     rows = []
-    
     if not is_hidden("out"): rows.append([{"text": "Outline VPN", "callback_data": "prod_out", "icon_custom_emoji_id": E_OUTLINE_ID, "style": "success"}])
     if not is_hidden("hid"): rows.append([{"text": "Hiddify / V2Ray", "callback_data": "prod_hid", "icon_custom_emoji_id": E_HIDDIFY_ID, "style": "primary"}])
     
     all_prods = [
-        ("CapCut", "capcut", E_CAPCUT_ID),
-        ("Alight Motion", "alight", E_ALIGHT_ID),
-        ("ChatGPT", "chatgpt", E_CHATGPT_ID),
-        ("Spotify", "spotify", E_SPOTIFY_ID),
-        ("Grok", "grok", E_GROK_ID),
-        ("Gemini", "gemini", E_GEMINI_ID),
-        ("YouTube", "youtube", E_YOUTUBE_ID),
-        ("Zoom", "zoom", E_ZOOM_ID)
+        ("CapCut", "capcut", E_CAPCUT_ID), ("Alight Motion", "alight", E_ALIGHT_ID),
+        ("ChatGPT", "chatgpt", E_CHATGPT_ID), ("Spotify", "spotify", E_SPOTIFY_ID),
+        ("Grok", "grok", E_GROK_ID), ("Gemini", "gemini", E_GEMINI_ID),
+        ("YouTube", "youtube", E_YOUTUBE_ID), ("Zoom", "zoom", E_ZOOM_ID)
     ]
     
     visible_prods = [p for p in all_prods if not is_hidden(p[1])]
-    
     for i in range(0, len(visible_prods), 2):
         row = []
         for p in visible_prods[i:i+2]:
@@ -240,15 +256,11 @@ def start_cmd(m):
     reply_markup.add("🛍️ Discover Products", "🔔 Contact Admin")
     reply_markup.add("👤 My Info", "📊 Order History")
     
-    caption = f"{m.from_user.first_name} — Hope your day is going smoothly\nYangon time: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Use the menu below your message box."
-    
-    # --- GitHub Raw Link Replaced Here ---
+    caption = f"{m.from_user.first_name} — Hope your day is going smoothly\nTime: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Use the menu below your message box."
     img_url = "https://raw.githubusercontent.com/myatmin07/Formula/refs/heads/main/file_000000009dd0720899ff78779c7e1fd2.png"
     
-    try:
-        bot.send_photo(m.chat.id, img_url, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
-    except:
-        bot.send_message(m.chat.id, caption, parse_mode="HTML", reply_markup=reply_markup)
+    try: bot.send_photo(m.chat.id, img_url, caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    except: bot.send_message(m.chat.id, caption, parse_mode="HTML", reply_markup=reply_markup)
         
     send_styled(m.chat.id, f"{E_STORE} <b>Discover our products:</b>", get_main_menu(m.from_user.id))
 
@@ -280,6 +292,10 @@ def query_handler(call):
 
     if data == "back_home":
         send_styled(cid, f"{E_STORE} <b>Discover our products:</b>", get_main_menu(uid), mid)
+        
+    elif data == "out_of_stock":
+        text = f"⚠️ <b>Out of Stock!</b>\nThis item is currently out of stock.\n\nPlease contact admin to purchase."
+        send_styled(cid, text, contact_admin_kb("back_home"), mid)
 
     elif data == "prod_out":
         kb = {"inline_keyboard": [[{"text": "🇸🇬 Singapore", "callback_data": "srv_out_sg"}], [{"text": "🇺🇸 USA", "callback_data": "srv_out_us"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
@@ -290,7 +306,7 @@ def query_handler(call):
         send_styled(cid, f"{E_HIDDIFY} <b>Select Hiddify Server:</b>", kb, mid)
 
     elif data == "prod_capcut":
-        kb = {"inline_keyboard": [[{"text": "Team | 35Days | 5500 MMK", "callback_data": "buy_acc_capcut_5500"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
+        kb = {"inline_keyboard": [[{"text": "Team | 35 Days | 5500 MMK", "callback_data": "buy_acc_capcut_5500"}], [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
         send_styled(cid, f"{E_CAPCUT} <b>CapCut Premium:</b>", kb, mid)
 
     elif data == "prod_alight":
@@ -299,23 +315,38 @@ def query_handler(call):
 
     elif data == "prod_chatgpt":
         kb = {"inline_keyboard": [
-            [{"text": "Plus 1 Month | 20000 MMK", "callback_data": "buy_acc_chatgpt_plus_2000"}],
+            [{"text": "Plus 1 Month | 20000 MMK", "callback_data": "buy_acc_chatgpt_plus_20000"}],
             [{"text": "Plus Renew 1 Month | 35000 MMK", "callback_data": "buy_acc_chatgpt_renew_35000"}],
             [{"text": "BUSINESS 1 Month | 25000 MMK", "callback_data": "buy_acc_chatgpt_biz_25000"}],
             [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
         ]}
-        text = f"{E_CHATGPT} <b>Select a plan:</b>\n\n"
-        text += "• <b>Plus & Plus Renew:</b> Private, Full Warranty.\n"
-        text += "• <b>Business:</b> Private, 1 Time Replacement."
+        text = f"{E_CHATGPT} <b>Select a plan:</b>\n\n• <b>Plus & Plus Renew:</b> Private, Full Warranty.\n• <b>Business:</b> Private, 1 Time Replacement."
         send_styled(cid, text, kb, mid)
         
     elif data == "prod_spotify":
-        kb = {"inline_keyboard": [
-            [{"text": "2 Month | Individual | 9000 MMK", "callback_data": "buy_acc_spotify_2_9000"}],
-            [{"text": "3 Month | Individual | 13500 MMK", "callback_data": "buy_acc_spotify_3_13500"}],
-            [{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
-        ]}
-        send_styled(cid, f"{E_SPOTIFY} <b>Select a plan:</b>", kb, mid)
+        kb = {"inline_keyboard": []}
+        db = load_db(STOCK_FILE)
+        
+        text = f"{E_SPOTIFY} <b>Select a Spotify plan:</b>\n\n"
+        
+        for prod, duration, price, title in [("spotify_2", 60, 9000, "2 Months Individual"), ("spotify_3", 90, 13500, "3 Months Individual")]:
+            stock = db.get(prod, [])
+            if stock:
+                acc = stock[0]
+                ts = acc.get("timestamp", time.time())
+                days_passed = int((time.time() - ts) / 86400)
+                days_left = max(0, duration - days_passed)
+                
+                text += f"• <b>{title}</b>\n"
+                text += f"  {E_PRICE} {price:,} MMK • {E_DAYS} {days_left} days left\n\n"
+                
+                kb["inline_keyboard"].append([{"text": f"Buy {title} - {price:,} MMK", "callback_data": f"buy_acc_{prod}_{price}"}])
+            else:
+                text += f"• <b>{title}</b>\n  ❌ Out of Stock\n\n"
+                kb["inline_keyboard"].append([{"text": f"{title} | Out of Stock", "callback_data": f"out_of_stock"}])
+                
+        kb["inline_keyboard"].append([{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}])
+        send_styled(cid, text, kb, mid)
 
     elif data == "prod_gemini":
         kb = {"inline_keyboard": [
@@ -339,18 +370,12 @@ def query_handler(call):
 
     elif data == "admin_stock_btn" and uid == ADMIN_ID:
         prods = [
-            ("CapCut", "capcut", E_CAPCUT_ID), 
-            ("Alight Motion", "alight", E_ALIGHT_ID), 
-            ("Gemini Pro", "gemini_pro", E_GEMINI_ID), 
-            ("Gemini Veo", "gemini_veo", E_GEMINI_ID), 
-            ("Zoom", "zoom", E_ZOOM_ID), 
-            ("Grok 7D", "grok_7", E_GROK_ID), 
-            ("Grok 15D", "grok_15", E_GROK_ID), 
-            ("YouTube", "youtube", E_YOUTUBE_ID),
-            ("CGPT Plus", "chatgpt_plus", E_CHATGPT_ID),
-            ("CGPT Renew", "chatgpt_renew", E_CHATGPT_ID),
-            ("CGPT Biz", "chatgpt_biz", E_CHATGPT_ID),
-            ("Spotify 2M", "spotify_2", E_SPOTIFY_ID),
+            ("CapCut", "capcut", E_CAPCUT_ID), ("Alight Motion", "alight", E_ALIGHT_ID), 
+            ("Gemini Pro", "gemini_pro", E_GEMINI_ID), ("Gemini Veo", "gemini_veo", E_GEMINI_ID), 
+            ("Zoom", "zoom", E_ZOOM_ID), ("Grok 7D", "grok_7", E_GROK_ID), 
+            ("Grok 15D", "grok_15", E_GROK_ID), ("YouTube", "youtube", E_YOUTUBE_ID),
+            ("CGPT Plus", "chatgpt_plus", E_CHATGPT_ID), ("CGPT Renew", "chatgpt_renew", E_CHATGPT_ID),
+            ("CGPT Biz", "chatgpt_biz", E_CHATGPT_ID), ("Spotify 2M", "spotify_2", E_SPOTIFY_ID),
             ("Spotify 3M", "spotify_3", E_SPOTIFY_ID)
         ]
         kb = {"inline_keyboard": [[{"text": n, "callback_data": f"astk_{p}", "icon_custom_emoji_id": e}] for n, p, e in prods] + [[{"text": "Back", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
@@ -374,12 +399,11 @@ def query_handler(call):
     elif data.startswith("tvis_") and uid == ADMIN_ID:
         p = data.split("_")[1]
         toggle_visibility(p)
-        bot.answer_callback_query(call.id, f"Toggled {p} visibility")
         query_handler(types.CallbackQuery(id=call.id, from_user=call.from_user, data="admin_vis_btn", chat_instance=call.chat_instance, message=call.message, json_string=""))
 
     elif data.startswith("astk_") and uid == ADMIN_ID:
         p = data.split("_", 1)[1]
-        sent = bot.send_message(cid, f"✍️ Send account for <b>{p.upper()}</b> (Format: <code>email:password</code>):", parse_mode="HTML")
+        sent = bot.send_message(cid, f"✍️ Send account details for <b>{p.upper()}</b>\n(Send exactly what the user will receive. Any format is accepted):", parse_mode="HTML")
         bot.register_next_step_handler(sent, process_stock, p)
 
     elif data.startswith("srv_"):
@@ -417,7 +441,7 @@ def query_handler(call):
         price = int(stripped[last_us_idx+1:])
         
         if not get_stock(prod):
-            text = f"⚠️ <b>Out of Stock!</b>\n{prod.replace('_', ' ').title()} is currently out of stock.\n\nPlease contact admin to purchase."
+            text = f"⚠️ <b>Out of Stock!</b>\nThis item is currently out of stock.\n\nPlease contact admin to purchase."
             send_styled(cid, text, contact_admin_kb("back_home"), mid)
             return
 
@@ -431,8 +455,22 @@ def query_handler(call):
             [{"text": "KPay", "callback_data": f"pay_kpy_{oid}", "icon_custom_emoji_id": E_KPAY_ID}],
             [{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]
         ]}
-        text = f"🛒 <b>Order Summary</b>\n\nProduct: {prod.replace('_', ' ').title()}\nPrice: <b>{price:,} MMK</b>\nOrder ID: #{oid}\n\nSelect Payment:"
-        send_styled(cid, text, kb, mid)
+        
+        icon = PROD_INFO.get(prod, (E_STORE, "Product", ""))[0]
+        prod_name = PROD_INFO.get(prod, (E_STORE, prod.replace('_', ' ').title(), ""))[1]
+        plan_desc = PROD_INFO.get(prod, (E_STORE, "", ""))[2]
+        
+        summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
+        if plan_desc:
+            summary += f"{icon} {prod_name} - {plan_desc}\n"
+        else:
+            summary += f"{icon} {prod_name}\n"
+        summary += f"{E_QTY} Quantity: 1\n"
+        summary += f"{E_PRICE} Total: <b>{price:,} MMK</b>\n"
+        summary += f"{E_ORDER} Order ID: #{oid}\n\n"
+        summary += f"Select Payment Method:"
+        
+        send_styled(cid, summary, kb, mid)
 
     elif data.startswith("pay_"):
         parts = data.split("_")
@@ -448,48 +486,38 @@ def query_handler(call):
         bank_logo = E_WAVE if method == "wav" else E_KPAY
         bank_name = "Wave Pay" if method == "wav" else "KPay"
         
-        if prod_type == "out": icon, prod_name, plan_desc = E_OUTLINE, "Outline VPN", f"{order['gb']} GB | 1 Month"
-        elif prod_type == "hid": icon, prod_name, plan_desc = E_HIDDIFY, "Hiddify / V2Ray", f"{order['gb']} GB | 1 Month"
-        elif prod_type == "capcut": icon, prod_name, plan_desc = E_CAPCUT, "CapCut Team", "35 Days"
-        elif prod_type == "alight": icon, prod_name, plan_desc = E_ALIGHT, "Alight Motion", "Private - 1 Year"
-        elif prod_type == "gemini_pro": icon, prod_name, plan_desc = E_GEMINI, "Gemini Pro", "1 Year (1 Month Warranty)"
-        elif prod_type == "gemini_veo": icon, prod_name, plan_desc = E_GEMINI, "Veo3 Ultra", "25K Credit (24 hr warranty)"
-        elif prod_type == "zoom": icon, prod_name, plan_desc = E_ZOOM, "Zoom", "100p | 28 Days"
-        elif prod_type == "grok_7": icon, prod_name, plan_desc = E_GROK, "Grok", "Super 7 Days"
-        elif prod_type == "grok_15": icon, prod_name, plan_desc = E_GROK, "Grok", "Super 15 Days"
-        elif prod_type == "youtube": icon, prod_name, plan_desc = E_YOUTUBE, "YouTube Premium", "Individual 1 Month"
-        elif prod_type == "chatgpt_plus": icon, prod_name, plan_desc = E_CHATGPT, "ChatGPT Plus", "1 Month"
-        elif prod_type == "chatgpt_renew": icon, prod_name, plan_desc = E_CHATGPT, "ChatGPT Plus Renew", "1 Month"
-        elif prod_type == "chatgpt_biz": icon, prod_name, plan_desc = E_CHATGPT, "ChatGPT Business", "1 Month"
-        elif prod_type == "spotify_2": icon, prod_name, plan_desc = E_SPOTIFY, "Spotify", "Individual 2 Months"
-        elif prod_type == "spotify_3": icon, prod_name, plan_desc = E_SPOTIFY, "Spotify", "Individual 3 Months"
+        if prod_type == "out": 
+            icon, prod_name, plan_desc = E_OUTLINE, "Outline VPN", f"{order['gb']} GB | 1 Month"
+        elif prod_type == "hid": 
+            icon, prod_name, plan_desc = E_HIDDIFY, "Hiddify / V2Ray", f"{order['gb']} GB | 1 Month"
+        else:
+            info = PROD_INFO.get(prod_type, (E_STORE, prod_type.replace('_', ' ').title(), ""))
+            icon, prod_name, plan_desc = info[0], info[1], info[2]
             
-        text = f"{icon} <b>{prod_name}</b>\n\n"
-        text += f"{E_STORE} {order['qty']}x {plan_desc}\n"
-        text += f"{E_PRICE} Price: {total:,} MMK\n"
-        text += f"{E_ORDER} Order ID: #{oid}\n\n"
-        text += f"{bank_logo} Pay via {bank_name}\n\n"
-        text += f"{tg_emoji('5407025283456835913', '📱')} Account: <code>09770088206</code>\n"
-        text += f"{tg_emoji('5258011929993026890', '👤')} Name: Myat Min Lwin\n"
-        text += f"{tg_emoji('5801018335919347111', '📌')} Note: Payment\n\n"
-        text += f"{tg_emoji('5258205968025525531', '📸')} Please send your payment screenshot to complete the order."
+        summary = f"{icon} {order['qty']}x {prod_name}"
+        if plan_desc:
+            summary += f" - {plan_desc}"
+        summary += f"\n{E_PRICE} Price: <b>{total:,} MMK</b>\n"
+        summary += f"{E_ORDER} Order ID: #{oid}\n\n"
+        summary += f"{bank_logo} Pay via {bank_name}\n\n"
+        summary += f"{tg_emoji('5407025283456835913', '📱')} Account: <code>09770088206</code>\n"
+        summary += f"{tg_emoji('5258011929993026890', '👤')} Name: Myat Min Lwin\n"
+        summary += f"{tg_emoji('5801018335919347111', '📌')} Note: Payment\n\n"
+        summary += f"{tg_emoji('5258205968025525531', '📸')} Please send your payment screenshot to complete the order."
         
         kb = {"inline_keyboard": [[{"text": "Cancel Order", "callback_data": "back_home", "icon_custom_emoji_id": E_BACK_ID, "style": "danger"}]]}
-        send_styled(cid, text, kb, mid)
+        send_styled(cid, summary, kb, mid)
 
     elif data.startswith("apw_"):
-        # Web App ကလာတဲ့ Order တွေကို Auto Approve လုပ်မည့်အပိုင်း
+        bot.edit_message_reply_markup(cid, mid, reply_markup=None)
         parts = data.split("_")
         user_id = parts[1]
         prod_type = parts[2]
         gb_val = int(parts[3])
 
         bot.edit_message_caption(f"⌛ <b>Processing Web Order...</b>", cid, mid, parse_mode="HTML")
-        
-        # Caption ထဲကနေ Server ကို ရှာဖွေခြင်း (e.g., 🌍 Server: SG)
         caption = call.message.caption or ""
         server = "us" if "US" in caption.upper() else "sg"
-        
         tz = pytz.timezone('Asia/Yangon')
         date_str = datetime.now(tz).strftime('%Y-%m-%d')
         
@@ -497,7 +525,7 @@ def query_handler(call):
             links = generate_outline_keys(server, gb_val, 1)
             if links:
                 links_text = "\n\n".join([f"{E_LINK} Link 1:\n<code>{l}</code>" for l in links])
-                success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Outline VPN keys:\n\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy key.\n2. Open Outline App.\n3. Click {E_PLUS} to add server."
+                success_msg = f"{E_VERIFIED} <b>Order confirmed!</b>\n\nHere are your Outline VPN keys:\n\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy key.\n2. Open Outline App.\n3. Click {E_PLUS} to add server."
                 bot.send_message(user_id, success_msg, parse_mode="HTML")
                 bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nOutline keys sent.", cid, mid, parse_mode="HTML")
                 add_usage(gb_val)
@@ -510,7 +538,7 @@ def query_handler(call):
             links = generate_3xui_keys(30, gb_val, user_id, 1)
             if links:
                 links_text = "\n\n".join([f"{E_LINK} Link 1:\n<code>{l}</code>" for l in links])
-                success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Hiddify/V2Ray links:\n{links_text}"
+                success_msg = f"{E_VERIFIED} <b>Order confirmed!</b>\n\nHere are your Hiddify/V2Ray links:\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy link.\n2. Open Hiddify App.\n3. Click {E_PLUS} and Add from Clipboard."
                 bot.send_message(user_id, success_msg, parse_mode="HTML")
                 bot.edit_message_caption(f"{caption}\n\n✅ <b>DELIVERED:</b> Web Order\nHiddify keys sent.", cid, mid, parse_mode="HTML")
                 add_usage(gb_val)
@@ -520,6 +548,7 @@ def query_handler(call):
                 bot.edit_message_caption(f"{caption}\n\n❌ <b>FAILED:</b> API Error.", cid, mid, parse_mode="HTML")
 
     elif data.startswith("approve_"):
+        bot.edit_message_reply_markup(cid, mid, reply_markup=None)
         oid = call.data.split("_")[1]
         pending = load_db(PENDING_FILE)
         if oid not in pending: return
@@ -531,13 +560,12 @@ def query_handler(call):
         tz = pytz.timezone('Asia/Yangon')
         date_str = datetime.now(tz).strftime('%Y-%m-%d')
         
-        # --- VPN Delivery ---
         if prod_type in ["out", "hid"]:
             if prod_type == "out":
                 links = generate_outline_keys(order['server'], order['gb'], order['qty'])
                 if len(links) == order['qty']:
                     links_text = "\n\n".join([f"{E_LINK} Link {i+1}:\n<code>{l}</code>" for i, l in enumerate(links)])
-                    success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Outline VPN keys:\n\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy key.\n2. Open Outline App.\n3. Click {E_PLUS} to add server."
+                    success_msg = f"{E_VERIFIED} <b>Order confirmed!</b>\n\nHere are your Outline VPN keys:\n\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy key.\n2. Open Outline App.\n3. Click {E_PLUS} to add server."
                     bot.send_message(order['uid'], success_msg, parse_mode="HTML")
                     bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\nOutline keys sent.", cid, mid, parse_mode="HTML")
                     add_usage(order['gb'] * order['qty'])
@@ -549,7 +577,7 @@ def query_handler(call):
                 links = generate_3xui_keys(30, order['gb'], order['uid'], order['qty'])
                 if len(links) == order['qty']:
                     links_text = "\n\n".join([f"{E_LINK} Link {i+1}:\n<code>{l}</code>" for i, l in enumerate(links)])
-                    success_msg = f"{E_VERIFIED} <b>Payment Received Successfully!</b>\n\nHere are your Hiddify/V2Ray links:\n{links_text}"
+                    success_msg = f"{E_VERIFIED} <b>Order confirmed!</b>\n\nHere are your Hiddify/V2Ray links:\n{links_text}\n\n{E_BULB} <b>How to use:</b>\n1. Copy link.\n2. Open Hiddify App.\n3. Click {E_PLUS} and Add from Clipboard."
                     bot.send_message(order['uid'], success_msg, parse_mode="HTML")
                     bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\nHiddify keys sent.", cid, mid, parse_mode="HTML")
                     add_usage(order['gb'] * order['qty'])
@@ -558,53 +586,110 @@ def query_handler(call):
                 else:
                     bot.send_message(ADMIN_ID, f"⚠️ Error: API failed for Order #{oid}.")
                     
-        # --- Accounts Delivery (1 Acc 1 User) ---
         else:
-            acc = pop_stock(prod_type) # Ensures 1 Acc 1 User safely
+            acc = pop_stock(prod_type)
             if not acc:
                 bot.send_message(ADMIN_ID, f"❌ <b>OUT OF STOCK!</b>\nCannot deliver {prod_type} for Order #{oid}. Please manually send to user <code>{order['uid']}</code>.", parse_mode="HTML")
                 bot.edit_message_caption(f"❌ <b>FAILED:</b> Out of Stock for Order #{oid}.", cid, mid, parse_mode="HTML")
                 return
-
-            titles = {
-                "capcut": "CapCut Team plan access for 1 month",
-                "alight": "Alight Motion Private access for 1 Year",
-                "gemini_pro": "Gemini Pro for 1 Year",
-                "gemini_veo": "Veo3 Ultra 25K Credit",
-                "zoom": "Zoom 100p | 28 Days",
-                "grok_7": "Grok Super 7 Days",
-                "grok_15": "Grok Super 15 Days",
-                "youtube": "YouTube Premium Individual 1 Month",
-                "chatgpt_plus": "ChatGPT Plus 1 Month (Private, Full Warranty)",
-                "chatgpt_renew": "ChatGPT Plus Renew 1 Month (Private, Full Warranty)",
-                "chatgpt_biz": "ChatGPT Business 1 Month (Private, 1 Time Replacement)",
-                "spotify_2": "Spotify Individual 2 Months",
-                "spotify_3": "Spotify Individual 3 Months"
-            }
-            warranties = {"gemini_pro": "1 Month Warranty", "gemini_veo": "24 hour warranty"}
             
-            text = f"<b>What you get:</b> {titles.get(prod_type, 'Premium Account')}\n"
-            if warranties.get(prod_type): text += f"<i>({warranties[prod_type]})</i>\n"
-            text += f"\n<b>Instructions:</b>\n"
-            text += f"• Sign in with the email and password below.\n"
+            info = PROD_INFO.get(prod_type, (E_STORE, prod_type.replace('_', ' ').title(), ""))
+            icon, prod_name, plan_desc = info[0], info[1], info[2]
             
-            if "capcut" in prod_type or "grok" in prod_type:
-                text += f"• ⚠️ <b>Do not change Mail & Password</b>\n"
+            if prod_type == "capcut":
+                text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
+                text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
+                text += f"{E_ORDER} Order ID: #{oid}\n\n"
+                text += f"⚠️ <b>Do NOT change Mail & Password</b>\n"
+                text += f"4 Devices 📱\n"
+                text += f"Renewed every 7 days for 5 times {E_VERIFIED}\n\n"
+                text += f"<b>What you get:</b> Team plan access for 1 month\n\n"
+                text += f"<b>Instructions:</b>\n"
+                text += f"• Sign in to CapCut with the email and password below.\n"
+                text += f"• Use only within the terms you agreed with the seller.\n"
+                text += f"• If something fails, contact admin with your Order ID.\n\n"
+                text += f"{acc['data']}"
                 
-            text += f"• Use only within the terms you agreed with the seller.\n"
-            text += f"• If something fails, tap Contact Admin below.\n\n"
-            text += f"{E_EMAIL} <b>Email</b>\n<code>{acc['email']}</code>\n\n"
-            text += f"{E_PASSWORD} <b>Password</b>\n<code>{acc['password']}</code>"
+                markup = {"inline_keyboard": [
+                    [{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}]
+                ]}
+                send_styled(order['uid'], text, markup)
             
-            send_styled(order['uid'], text, contact_admin_kb())
-            time.sleep(0.5)
-            bot.send_message(order['uid'], f"{E_VERIFIED} Payment verified! Check the message above for your account details.", parse_mode="HTML")
-            
-            bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\n{prod_type.replace('_', ' ').title()} Account details sent.", cid, mid, parse_mode="HTML")
-            add_history(order['uid'], f"• #{oid} {prod_type.replace('_', ' ').title()} - confirmed - {date_str}")
+            elif prod_type == "alight":
+                text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
+                text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
+                text += f"{E_ORDER} Order ID: #{oid}\n\n"
+                text += f"<b>Quick sign-in example:</b>\n"
+                text += f"• Open Alight Motion ➔ Sign in\n"
+                text += f"• Choose <b>Sign in with email</b>\n"
+                text += f"• Enter the email below\n"
+                text += f"• Open your inbox (button below) and use the sign-in link from the email\n\n"
+                text += f"{acc['data']}"
+                
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+', acc['data'])
+                markup_keys = []
+                if email_match:
+                    markup_keys.append([{"text": "Mail Access 📩", "url": f"https://generator.email/{email_match.group(0)}"}])
+                markup_keys.append([{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}])
+                
+                markup = {"inline_keyboard": markup_keys}
+                send_styled(order['uid'], text, markup)
+                
+            elif "spotify" in prod_type:
+                text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
+                text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
+                text += f"{E_ORDER} Order ID: #{oid}\n\n"
+                text += f"<b>Your account:</b>\n\n"
+                text += f"{acc['data']}\n\n"
+                text += f"Sign in with the credentials above. Keep them private. Contact admin with your Order ID if you need help."
+                
+                markup = {"inline_keyboard": [
+                    [{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}]
+                ]}
+                send_styled(order['uid'], text, markup)
+                
+            else:
+                text = f"{E_VERIFIED} <b>Order confirmed!</b>\n\n"
+                if plan_desc:
+                    text += f"{icon} <b>{prod_name} — {plan_desc}</b>\n"
+                else:
+                    text += f"{icon} <b>{prod_name}</b>\n"
+                text += f"{E_ORDER} Order ID: #{oid}\n\n"
+                text += f"<b>Instructions:</b>\n"
+                text += f"• Sign in with the credentials below.\n"
+                if "grok" in prod_type:
+                    text += f"• ⚠️ <b>Do NOT change Mail & Password</b>\n"
+                text += f"• Keep them private and use within agreed terms.\n\n"
+                text += f"{acc['data']}"
+                
+                markup = {"inline_keyboard": [
+                    [{"text": "Contact Admin (if problem)", "url": "https://t.me/FORMULA_X0", "icon_custom_emoji_id": E_CONTACT_ID}]
+                ]}
+                send_styled(order['uid'], text, markup)
+                
+            bot.edit_message_caption(f"✅ <b>DELIVERED:</b> Order #{oid}\n{prod_name} details sent.", cid, mid, parse_mode="HTML")
+            add_history(order['uid'], f"• #{oid} {prod_name} - confirmed - {date_str}")
             del pending[oid]
 
         save_db(PENDING_FILE, pending)
+
+    elif data.startswith("reject_") or data.startswith("rjw_"):
+        bot.edit_message_reply_markup(cid, mid, reply_markup=None)
+        if data.startswith("reject_"):
+            oid = data.split("_")[1]
+            pending = load_db(PENDING_FILE)
+            if oid in pending:
+                uid_to_notify = pending[oid]['uid']
+                del pending[oid]
+                save_db(PENDING_FILE, pending)
+                bot.send_message(uid_to_notify, "❌ <b>Payment Rejected</b>\n\nYour payment slip was invalid or incomplete. Please contact the admin for support.", parse_mode="HTML")
+        else:
+            uid_to_notify = data.split("_")[1]
+            bot.send_message(uid_to_notify, "❌ <b>Payment Rejected</b>\n\nYour web order payment slip was invalid or incomplete. Please contact the admin for support.", parse_mode="HTML")
+        
+        caption = call.message.caption or ""
+        new_caption = caption + "\n\n❌ <b>ORDER REJECTED</b>"
+        bot.edit_message_caption(new_caption, cid, mid, parse_mode="HTML")
 
 def process_vpn_qty(message, prod_type, server, gb_val):
     try:
@@ -638,21 +723,28 @@ def process_vpn_qty(message, prod_type, server, gb_val):
         
         icon = E_OUTLINE if prod_type == "out" else E_HIDDIFY
         prod_name = "Outline VPN" if prod_type == "out" else "Hiddify / V2Ray"
-        summary = f"🛒 <b>Order Summary</b>\n\n{icon} {prod_name} - {gb_val} GB | 1 Month\n📦 Quantity: {qty}\n{E_PRICE} Total: <b>{total:,} MMK</b>\n{E_ORDER} Order ID: #{oid}\n\nSelect Payment Method:"
+        
+        summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
+        summary += f"{icon} {prod_name} - {gb_val} GB | 1 Month\n"
+        summary += f"{E_QTY} Quantity: {qty}\n"
+        summary += f"{E_PRICE} Total: <b>{total:,} MMK</b>\n"
+        summary += f"{E_ORDER} Order ID: #{oid}\n\n"
+        summary += f"Select Payment Method:"
         
         send_styled(message.chat.id, summary, kb)
     except:
         bot.send_message(message.chat.id, "⚠️ Invalid quantity.", parse_mode="HTML")
 
 def process_stock(m, p):
-    if ":" not in m.text:
-        bot.reply_to(m, "❌ Invalid format. Use <code>email:password</code>", parse_mode="HTML")
-        return
-    email, pwd = m.text.split(":", 1)
     db = load_db(STOCK_FILE)
     if p not in db: db[p] = []
-    db[p].append({"email": email.strip(), "password": pwd.strip()})
-    save_db(STOCK_FILE, db) # Fully saves inside the file
+    
+    db[p].append({
+        "data": m.text.strip(),
+        "timestamp": time.time()
+    })
+    
+    save_db(STOCK_FILE, db) 
     bot.reply_to(m, f"✅ Stock successfully added to <b>{p.upper()}</b>.\nTotal Available: {len(db[p])}", parse_mode="HTML")
 
 @bot.message_handler(content_types=['photo'])
@@ -661,7 +753,6 @@ def handle_payment_slip(message):
     pending = load_db(PENDING_FILE)
     
     user_orders = [oid for oid, val in pending.items() if val.get('uid') == uid]
-    
     if not user_orders:
         return 
         
@@ -672,7 +763,10 @@ def handle_payment_slip(message):
     save_db(PENDING_FILE, pending)
 
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_id}"), types.InlineKeyboardButton("❌ Reject", callback_data=f"reject_{order_id}"))
+    markup.add(
+        types.InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_id}"), 
+        types.InlineKeyboardButton("❌ Reject", callback_data=f"reject_{order_id}")
+    )
     
     order = pending[order_id]
     prod_name = order.get('product', '').replace('_', ' ').title()
@@ -687,5 +781,4 @@ def handle_payment_slip(message):
     bot.reply_to(message, "✅ <b>Slip received.</b> Admin will verify it shortly.", parse_mode="HTML")
 
 if __name__ == "__main__":
-    print("Formula X Final is starting on VPS...")
     bot.infinity_polling()
