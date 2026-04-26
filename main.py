@@ -299,7 +299,7 @@ def start_cmd(m):
     reply_markup.add(btn_store, types.KeyboardButton("🔔 Contact Admin"))
     reply_markup.add(types.KeyboardButton("👤 My Info"), types.KeyboardButton("📊 Order History"))
     
-    caption = f"{m.from_user.first_name} — Hope your day is going smoothly\nTime: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Click '🛍️ Digital Store' below to open the Mini App."
+    caption = f"Formula — Hope your day is going smoothly\nTime: <i>{now}</i>.\n\n{E_TIP} <b>Tip:</b> Click '🛍️ Digital Store' below to open the Mini App."
     
     img_url = "https://raw.githubusercontent.com/myatmin07/Formula/refs/heads/main/file_000000009dd0720899ff78779c7e1fd2.png"
     
@@ -313,7 +313,6 @@ def handle_webapp_data(message):
     if not is_authorized(message.from_user.id): return
     try:
         data = json.loads(message.web_app_data.data)
-        
         if data.get("action") == "buy_vpn_webapp":
             prod_type = data.get("product")
             server = data.get("server")
@@ -339,95 +338,6 @@ def handle_webapp_data(message):
             summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n{icon} {prod_name} - {flag}\n{E_QTY} Package: {gb_val} GB | 1 Month\n{E_PRICE} Total: <b>{price:,} MMK</b>\n{E_ORDER} Order ID: #{oid}\n\nSelect Payment Method:"
             
             send_styled(message.chat.id, summary, kb)
-            
-        elif data.get("action") == "get_profile":
-            user_id = message.from_user.id
-            history = load_db(HISTORY_FILE).get(str(user_id), [])
-            total_orders = len(history)
-            total_spent = sum(item.get('total', 0) for item in history)
-            bot.send_message(message.chat.id, json.dumps({"type": "profile", "total_orders": total_orders, "total_spent": total_spent}))
-            
-        elif data.get("action") == "get_history":
-            user_id = message.from_user.id
-            history = load_db(HISTORY_FILE).get(str(user_id), [])
-            bot.send_message(message.chat.id, json.dumps({"type": "history", "data": history}))
-            
-        elif data.get("action") == "get_leaderboard":
-            history_db = load_db(HISTORY_FILE)
-            users_db = load_db(USERS_FILE)
-            
-            leaderboard = []
-            for uid, orders in history_db.items():
-                total_spent = sum(o.get('total', 0) for o in orders)
-                if total_spent > 0:
-                    name = users_db.get(uid, {}).get('name', f"User {uid}")
-                    leaderboard.append({
-                        "name": name, 
-                        "spent": total_spent,
-                        "photo": f"https://api.dicebear.com/7.x/avataaars/svg?seed={name}"
-                    })
-                    
-            leaderboard.sort(key=lambda x: x['spent'], reverse=True)
-            bot.send_message(message.chat.id, json.dumps({"type": "leaderboard", "data": leaderboard[:5]}))
-            
-        elif data.get("action") == "check_usage":
-            access_url = data.get('access_url', '').strip()
-            
-            match = re.search(r'@([^/:?#]+)', access_url)
-            if not match:
-                bot.send_message(message.chat.id, json.dumps({"type": "usage_result", "success": False, "error": "Invalid Key Format"}))
-                return
-            
-            target_host = match.group(1)
-            api_url = OUTLINE_APIS.get(target_host)
-            
-            if not api_url:
-                bot.send_message(message.chat.id, json.dumps({"type": "usage_result", "success": False, "error": "Server not supported"}))
-                return
-
-            keys_res = requests.get(f"{api_url}/access-keys", verify=False, timeout=10)
-            metrics_res = requests.get(f"{api_url}/metrics/transfer", verify=False, timeout=10)
-            
-            if keys_res.status_code != 200 or metrics_res.status_code != 200:
-                bot.send_message(message.chat.id, json.dumps({"type": "usage_result", "success": False, "error": "Server API Error"}))
-                return
-                
-            keys_data = keys_res.json().get('accessKeys', [])
-            metrics_data = metrics_res.json().get('bytesTransferredByUserId') or {}
-            
-            base_access_url = access_url.split('#')[0]
-            
-            found = False
-            for key in keys_data:
-                if key.get('accessUrl', '').split('#')[0] == base_access_url:
-                    kid = str(key.get('id'))
-                    used_bytes = metrics_data.get(kid, 0)
-                    limit_bytes = key.get('dataLimit', {}).get('bytes')
-                    
-                    used_gb = bytes_to_gb(used_bytes)
-                    limit_gb = bytes_to_gb(limit_bytes) if limit_bytes else "Unlimited"
-                    
-                    percentage = 0
-                    if limit_bytes and limit_bytes > 0:
-                        percentage = min(100, round((used_bytes / limit_bytes) * 100))
-                    
-                    bot.send_message(message.chat.id, json.dumps({
-                        "type": "usage_result",
-                        "success": True,
-                        "data": {
-                            'key_name': key.get('name', 'Active Key'),
-                            'used_gb': used_gb,
-                            'limit_gb': limit_gb,
-                            'percentage': percentage,
-                            'server': "Singapore" if "sg" in target_host or "168.144" in target_host else "USA"
-                        }
-                    }))
-                    found = True
-                    break
-            
-            if not found:
-                bot.send_message(message.chat.id, json.dumps({"type": "usage_result", "success": False, "error": "Key not found on server"}))
-
     except Exception as e:
         bot.send_message(message.chat.id, f"{E_WARN} Error processing app data.", parse_mode="HTML")
 
@@ -636,10 +546,11 @@ def query_handler(call):
             icon, prod_name, plan_desc = info[0], info[1], info[2]
             
         summary = f"{E_SUMMARY} <b>Order Summary</b>\n\n"
-        summary += f"{icon} {prod_name}"
         if plan_desc:
-            summary += f" - {plan_desc}"
-        summary += f"\n{E_QTY} Quantity: {order['qty']}\n"
+            summary += f"{icon} {prod_name} - {plan_desc}\n"
+        else:
+            summary += f"{icon} {prod_name}\n"
+        summary += f"{E_QTY} Quantity: {order['qty']}\n"
         summary += f"{E_PRICE} Total: <b>{total:,} MMK</b>\n"
         summary += f"{E_ORDER} Order ID: #{oid}\n\n"
         summary += f"Select Payment Method:\n\n"
