@@ -125,7 +125,7 @@ def check_key_on_server(server_name, api_url, user_key):
     }
 
 
-@app.route("/api/check", methods=["GET", "OPTIONS"])
+@app.route("/api/check", methods=["GET", "POST", "OPTIONS"])
 def check_outline_key():
     if request.method == "OPTIONS":
         return jsonify({
