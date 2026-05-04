@@ -16,7 +16,7 @@ import traceback
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- Configuration ---
-API_TOKEN = '8483869457:AAFI5GOrPxESGhsvJIgpZEcIRmZb3XbK7sg'
+API_TOKEN = '8483869457:AAEyH1r11HQjjOOwUm5Q1-FjU4wVjk5s82E'
 ADMIN_ID = 5890904598
 bot = telebot.TeleBot(API_TOKEN)
 
